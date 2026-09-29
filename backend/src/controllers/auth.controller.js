@@ -1,6 +1,6 @@
 import User from '../models/User.js';
 import bcrypt from 'bcrypt';
-import { generateAccessToken, generateRefreshToken } from '../utils/token.js';
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/token.js';
 
 export const register = async (req, res) => {
     try {
@@ -86,6 +86,67 @@ export const login = async (req, res) => {
 
     } catch (error) {
         console.error('Error during user login:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+        });
+    }
+}
+
+
+export const refreshAccessToken = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+
+        if (!refreshToken) {
+            return res.status(401).json({
+                success: false,
+                message: 'Refresh token is required',
+            });
+        }
+
+        const decoded = verifyRefreshToken(refreshToken);
+
+        const newAccessToken = generateAccessToken(decoded.userId);
+
+        return res.status(200).json({
+            success: true,
+            accessToken: newAccessToken,
+        });
+
+    } catch (error) {
+        console.error('Error refreshing access token:', error);
+
+        return res.status(401).json({
+            success: false,
+            message: 'Invalid or expired refresh token',
+        });
+    }
+}
+
+export const getMe = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            })
+        }
+
+        return res.status(200).json({
+            success: true,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching user data:', error);
 
         return res.status(500).json({
             success: false,

@@ -72,11 +72,17 @@ export const login = async (req, res) => {
         const accessToken = generateAccessToken(user._id);
         const refreshToken = generateRefreshToken(user._id);
 
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+            sameSite: 'Strict', // Prevent CSRF attacks
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+        });
+
         return res.status(200).json({
             success: true,
             message: 'Login successful',
             accessToken,
-            refreshToken,
             user: {
                 id: user._id,
                 name: user.name,
@@ -94,10 +100,9 @@ export const login = async (req, res) => {
     }
 }
 
-
 export const refreshAccessToken = async (req, res) => {
     try {
-        const { refreshToken } = req.body;
+        const refreshToken = req.cookies.refreshToken;
 
         if (!refreshToken) {
             return res.status(401).json({
@@ -109,6 +114,14 @@ export const refreshAccessToken = async (req, res) => {
         const decoded = verifyRefreshToken(refreshToken);
 
         const newAccessToken = generateAccessToken(decoded.userId);
+        const newRefreshToken = generateRefreshToken(decoded.userId);
+        // refresh-token rotation
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
 
         return res.status(200).json({
             success: true,
@@ -123,6 +136,19 @@ export const refreshAccessToken = async (req, res) => {
             message: 'Invalid or expired refresh token',
         });
     }
+}
+
+export const logout = (req, res) => {
+    res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'Strict',
+    });
+
+    return res.status(200).json({
+        success: true,
+        message: 'Logged out successfully',
+    });
 }
 
 export const getMe = async (req, res) => {

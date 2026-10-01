@@ -133,48 +133,12 @@ export const refreshAccessToken = async (req, res) => {
 
         const decoded = verifyRefreshToken(refreshToken);
 
-        console.log('Decoded refresh token:', decoded);
-
         const { userId, sessionId } = decoded;
 
-        // Find the corresponding session
-        const session = await Session.findOne({
-            _id: sessionId,
-            userId,
-            revokedAt: null,
-        });
+         // Hash the token received from the client
+        const currentTokenHash = hashRefreshToken(refreshToken);
 
-        if(!session) {
-            return res.status(401).json({
-                success: false,
-                message: 'Session is invalid or has been revoked',
-            });
-        }
-
-        //Check session expiration
-        if (session.expiresAt < new Date()) {
-            return res.status(401).json({
-                success: false,
-                message: 'Session has expired',
-            });
-        }
-
-        // Hash the refresh token sent by the client
-        const tokenHash = hashRefreshToken(refreshToken);
-
-        // Compare it with the stored hash
-        if (tokenHash !== session.refreshTokenHash) {
-            // Possible refresh-token reuse
-            session.revokedAt = new Date();
-            await session.save();
-
-            return res.status(401).json({
-                success: false,
-                message: "Invalid refresh token.",
-            });
-        }
-
-        const newAccessToken = generateAccessToken(decoded.userId);
+        const newAccessToken = generateAccessToken(userId);
 
         // Rotate refresh token
         const newRefreshToken = generateRefreshToken(
@@ -182,12 +146,51 @@ export const refreshAccessToken = async (req, res) => {
             sessionId
         );
 
-        // Stone hash of the new refresh token in the session
-        session.refreshTokenHash = hashRefreshToken(newRefreshToken);
+        const newRefreshTokenHash = hashRefreshToken(newRefreshToken);
 
-        session.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // Extend session expiration
+        const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-        await session.save();
+        // Atomically replace the old refresh-token hash
+        const updatedSession = await Session.findOneAndUpdate(
+            {
+                _id: sessionId,
+                userId,
+                refreshTokenHash: currentTokenHash,
+                revokedAt: null,
+                expiresAt: { $gt: new Date() },
+            },
+            {
+                $set: {
+                    refreshTokenHash: newRefreshTokenHash,
+                    expiresAt: newExpiresAt,
+                },
+            },
+            {
+                new: true,
+            }
+        );
+
+        // The token could not be consumed
+        if (!updatedSession) {
+            // Check whether this was a possible token-reuse attempt
+            const existingSession = await Session.findOne({
+                _id: sessionId,
+                userId,
+            });
+
+            if (
+                existingSession &&
+                !existingSession.revokedAt
+            ) {
+                existingSession.revokedAt = new Date();
+                await existingSession.save();
+            }
+
+            return res.status(401).json({
+                success: false,
+                message: "Invalid refresh token.",
+            });
+        }   
 
         // Send the new refresh token as HttpOnly cookie
         res.cookie("refreshToken", newRefreshToken, {

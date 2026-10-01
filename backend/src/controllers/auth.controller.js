@@ -259,6 +259,42 @@ export const logout = async (req, res) => {
     
 }
 
+export const logoutAllDevices = async (req, res) => {
+    try {
+        await Session.updateMany(
+            {
+                userId: req.user.userId,
+                revokedAt: null,
+            },
+            {
+                $set: {
+                    revokedAt: new Date(),
+                },
+            }
+        );
+
+        // Clear the current device's refresh token
+        res.clearCookie("refreshToken", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Logged out from all devices successfully.",
+        });
+
+    } catch (error) {
+        console.error("Error logging out from all devices:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+        });
+    }
+};
+
 export const getMe = async (req, res) => {
     try {
         const user = await User.findById(req.user.userId);

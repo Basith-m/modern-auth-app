@@ -36,12 +36,8 @@ const userSchema = new Schema({
     isEmailVerified: {
         type: Boolean,
         default: false // Indicates whether the user's email has been verified
-    },
-    refreshToken: {
-        type: String,
-        default: null,
-        select: false // Excludes the refreshToken field from query results by default
     }
+    
 }, { timestamps: true }); // MongoDB automatically adds createdAt and updatedAt fields to the schema
 
 userSchema.pre('save', async function () {

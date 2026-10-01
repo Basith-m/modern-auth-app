@@ -1,6 +1,12 @@
 import User from '../models/User.js';
+import Session from '../models/Session.js';
 import bcrypt from 'bcrypt';
-import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/token.js';
+import { 
+    generateAccessToken, 
+    generateRefreshToken, 
+    verifyRefreshToken, 
+    hashRefreshToken 
+} from '../utils/token.js';
 
 export const register = async (req, res) => {
     try {
@@ -70,7 +76,21 @@ export const login = async (req, res) => {
 
         // Generate authentication tokens
         const accessToken = generateAccessToken(user._id);
-        const refreshToken = generateRefreshToken(user._id);
+
+        const session = new Session({
+            userId: user._id,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+        })
+        
+        //Generate refresh token using the session ID and user ID
+        const refreshToken = generateRefreshToken(
+            user._id,
+            session._id
+        );
+
+        session.refreshTokenHash = hashRefreshToken(refreshToken);
+
+        await session.save();
 
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
@@ -113,9 +133,63 @@ export const refreshAccessToken = async (req, res) => {
 
         const decoded = verifyRefreshToken(refreshToken);
 
+        console.log('Decoded refresh token:', decoded);
+
+        const { userId, sessionId } = decoded;
+
+        // Find the corresponding session
+        const session = await Session.findOne({
+            _id: sessionId,
+            userId,
+            revokedAt: null,
+        });
+
+        if(!session) {
+            return res.status(401).json({
+                success: false,
+                message: 'Session is invalid or has been revoked',
+            });
+        }
+
+        //Check session expiration
+        if (session.expiresAt < new Date()) {
+            return res.status(401).json({
+                success: false,
+                message: 'Session has expired',
+            });
+        }
+
+        // Hash the refresh token sent by the client
+        const tokenHash = hashRefreshToken(refreshToken);
+
+        // Compare it with the stored hash
+        if (tokenHash !== session.refreshTokenHash) {
+            // Possible refresh-token reuse
+            session.revokedAt = new Date();
+            await session.save();
+
+            return res.status(401).json({
+                success: false,
+                message: "Invalid refresh token.",
+            });
+        }
+
         const newAccessToken = generateAccessToken(decoded.userId);
-        const newRefreshToken = generateRefreshToken(decoded.userId);
-        // refresh-token rotation
+
+        // Rotate refresh token
+        const newRefreshToken = generateRefreshToken(
+            userId,
+            sessionId
+        );
+
+        // Stone hash of the new refresh token in the session
+        session.refreshTokenHash = hashRefreshToken(newRefreshToken);
+
+        session.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // Extend session expiration
+
+        await session.save();
+
+        // Send the new refresh token as HttpOnly cookie
         res.cookie("refreshToken", newRefreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
@@ -138,17 +212,48 @@ export const refreshAccessToken = async (req, res) => {
     }
 }
 
-export const logout = (req, res) => {
-    res.clearCookie('refreshToken', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'Strict',
-    });
+export const logout = async (req, res) => {
+    try {
+        const refreshToken = req.cookies.refreshToken;
 
-    return res.status(200).json({
-        success: true,
-        message: 'Logged out successfully',
-    });
+        if (refreshToken) {
+            try {
+                const decoded = verifyRefreshToken(refreshToken);
+
+                await Session.findOneAndUpdate(
+                    {
+                        _id: decoded.sessionId,
+                        userId: decoded.userId,
+                        revokedAt: null,
+                    },
+                    {
+                        revokedAt: new Date(),
+                    }
+                );
+            } catch (error) {
+                // Token is already invalid or expired.
+                // We still continue with logout.
+            }
+        }
+
+        res.clearCookie('refreshToken', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'Strict',
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Logged out successfully',
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+        });
+    }
+    
 }
 
 export const getMe = async (req, res) => {

@@ -7,6 +7,8 @@ import {
     verifyRefreshToken, 
     hashRefreshToken 
 } from '../utils/token.js';
+import { verifyGoogleIdToken } from "../services/google.service.js";
+import { createAuthSession } from "../services/auth.service.js";
 
 export const register = async (req, res) => {
     try {
@@ -74,23 +76,7 @@ export const login = async (req, res) => {
             });
         }
 
-        // Generate authentication tokens
-        const accessToken = generateAccessToken(user._id);
-
-        const session = new Session({
-            userId: user._id,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-        })
-        
-        //Generate refresh token using the session ID and user ID
-        const refreshToken = generateRefreshToken(
-            user._id,
-            session._id
-        );
-
-        session.refreshTokenHash = hashRefreshToken(refreshToken);
-
-        await session.save();
+        const { accessToken, refreshToken } = await createAuthSession(user._id);
 
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
@@ -119,6 +105,118 @@ export const login = async (req, res) => {
         });
     }
 }
+
+export const googleLogin = async (req, res) => {
+    try {
+        const { credential } = req.body;
+
+        if (!credential) {
+            return res.status(400).json({
+                success: false,
+                message: "Google credential is required.",
+            });
+        }
+
+        // 1. Verify the Google ID token
+        let payload;
+
+        try {
+            payload = await verifyGoogleIdToken(credential);
+        } catch {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid Google credential.",
+            });
+        }
+
+        const {
+            sub: googleId,
+            email,
+            email_verified: emailVerified,
+            name,
+            picture,
+        } = payload;
+
+        // 2. Validate the required Google information
+        if (!googleId || !email || !emailVerified) {
+            return res.status(401).json({
+                success: false,
+                message: "A verified Google email is required.",
+            });
+        }
+
+        // 3. Find an existing Google account
+        let user = await User.findOne({
+            provider: "google",
+            providerId: googleId,
+        });
+
+        if (!user) {
+            // 4. Prevent silently merging an existing local account
+            const existingUser = await User.findOne({
+                email: email.toLowerCase(),
+            });
+
+            if (existingUser) {
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "An account already exists with this email. Please log in using your existing method.",
+                });
+            }
+
+            // 5. Create a new Google user
+            user = await User.create({
+                name: name || "Google User",
+                email: email.toLowerCase(),
+                provider: "google",
+                providerId: googleId,
+                avatar: picture || null,
+                isEmailVerified: true,
+            });
+        }
+
+        // 6. Create our own application session
+        const { accessToken, refreshToken } =
+            await createAuthSession(user._id);
+
+        // 7. Set our own refresh token cookie
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+
+        // 8. Return our access token and user information
+        return res.status(200).json({
+            success: true,
+            message: "Google login successful.",
+            accessToken,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                avatar: user.avatar,
+            },
+        });
+    } catch (error) {
+        // Handle a concurrent registration for the same email
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message: "An account already exists with this email.",
+            });
+        }
+
+        console.error("Google login error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error.",
+        });
+    }
+};
 
 export const refreshAccessToken = async (req, res) => {
     try {

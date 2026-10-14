@@ -1,51 +1,70 @@
 
-import { GoogleLogin } from "@react-oauth/google";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-function App() {
-    const handleGoogleSuccess = async (credentialResponse) => {
-        try {
-            const response = await fetch(
-                "http://localhost:5000/api/auth/google",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    credentials: "include",
-                    body: JSON.stringify({
-                        credential: credentialResponse.credential,
-                    }),
-                }
-            );
+import { useAuth } from "./context/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import DashboardPage from "./pages/DashboardPage";
 
-            const data = await response.json();
+function AppRoutes() {
+    const { isAuthenticated, loading } = useAuth();
 
-            if (!response.ok) {
-                throw new Error(
-                    data.message || "Google login failed."
-                );
-            }
-
-            console.log("Login successful:", data);
-            console.log("Access token:", data.accessToken);
-        } catch (error) {
-            console.error("Google login error:", error.message);
-        }
-    };
+    if (loading) {
+        return <main><p>Restoring your session...</p></main>;
+    }
 
     return (
-        <main>
-            <h1>Modern Auth App</h1>
-            <p>Sign in to continue</p>
-
-            <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => {
-                    console.error("Google Sign-In failed.");
-                }}
+        <Routes>
+            <Route
+                path="/"
+                element={
+                    <Navigate
+                        to={isAuthenticated ? "/dashboard" : "/login"}
+                        replace
+                    />
+                }
             />
-        </main>
+
+            <Route
+                path="/login"
+                element={
+                    isAuthenticated
+                        ? <Navigate to="/dashboard" replace />
+                        : <LoginPage />
+                }
+            />
+
+            <Route
+                path="/register"
+                element={
+                    isAuthenticated
+                        ? <Navigate to="/dashboard" replace />
+                        : <RegisterPage />
+                }
+            />
+
+            <Route
+                path="/dashboard"
+                element={
+                    <ProtectedRoute>
+                        <DashboardPage />
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="*"
+                element={<Navigate to="/" replace />}
+            />
+        </Routes>
     );
 }
 
-export default App;
+export default function App() {
+    return (
+        <BrowserRouter>
+            <AppRoutes />
+        </BrowserRouter>
+    );
+}

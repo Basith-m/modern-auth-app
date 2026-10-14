@@ -67,6 +67,14 @@ export const login = async (req, res) => {
             });
         }
 
+        // Check whether this account supports password login
+        if (user.provider === "google" || !user.password) {
+            return res.status(401).json({
+                message:
+                    "This account uses Google sign-in. Please continue with Google.",
+            });
+        }
+
         const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (!isPasswordValid) {
@@ -264,7 +272,7 @@ export const refreshAccessToken = async (req, res) => {
                 },
             },
             {
-                new: true,
+                returnDocument: "after",
             }
         );
 

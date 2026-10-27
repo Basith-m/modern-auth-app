@@ -10,9 +10,16 @@ import {
 import { verifyGoogleIdToken } from "../services/google.service.js";
 import { createAuthSession } from "../services/auth.service.js";
 
-export const register = async (req, res) => {
+export const register = async (req, res, next) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password } = req.validatedBody;
+
+        // Check bcrypt's 72-byte password limit
+        if (Buffer.byteLength(password, "utf8") > 72) {
+            return res.status(400).json({
+                message: "Password must not exceed 72 bytes.",
+            });
+        }
 
         if (!name || !email || !password) {
             return res.status(400).json({ 
@@ -38,18 +45,26 @@ export const register = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error during user registration:', error);
+        // console.error('Error during user registration:', error);
 
-        res.status(500).json({ 
-            success: false,
-            message: 'Internal server error', 
-        });       
+        // res.status(500).json({ 
+        //     success: false,
+        //     message: 'Internal server error', 
+        // });
+        next(error);
     }
 }
 
-export const login = async (req, res) => {
+export const login = async (req, res, next) => {
     try {
-        const { email, password } = req.body;
+        const { email, password } = req.validatedBody;
+
+        // Check bcrypt's 72-byte password limit
+        if (Buffer.byteLength(password, "utf8") > 72) {
+            return res.status(400).json({
+                message: "Password must not exceed 72 bytes.",
+            });
+        }
 
         if (!email || !password) {
             return res.status(400).json({
@@ -105,12 +120,13 @@ export const login = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error during user login:', error);
+        // console.error('Error during user login:', error);
 
-        return res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-        });
+        // return res.status(500).json({
+        //     success: false,
+        //     message: 'Internal server error',
+        // });
+        next(error);
     }
 }
 

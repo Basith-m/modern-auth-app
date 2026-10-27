@@ -13,6 +13,7 @@ import {
     logoutRequest,
     getMeRequest,
     refreshRequest,
+    authenticatedRequest,
 } from "../services/authApi";
 
 const AuthContext = createContext(null);
@@ -52,6 +53,19 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const requestWithAuth = async (endpoint, options = {}) => {
+        return authenticatedRequest(
+            endpoint,
+            accessToken,
+            setAccessToken,
+            () => {
+                setUser(null);
+                setAccessToken(null);
+            },
+            options
+        );
+    };
+
     // Restore a session after a page reload
     const restoreSession = useCallback(async () => {
         try {
@@ -84,6 +98,7 @@ export const AuthProvider = ({ children }) => {
         login,
         googleLogin,
         logout,
+        requestWithAuth,
     };
 
     return (

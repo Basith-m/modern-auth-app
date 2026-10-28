@@ -130,7 +130,7 @@ export const login = async (req, res, next) => {
     }
 }
 
-export const googleLogin = async (req, res) => {
+export const googleLogin = async (req, res, next) => {
     try {
         const { credential } = req.body;
 
@@ -233,16 +233,11 @@ export const googleLogin = async (req, res) => {
             });
         }
 
-        console.error("Google login error:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal Server Error.",
-        });
+        next(error);
     }
 };
 
-export const refreshAccessToken = async (req, res) => {
+export const refreshAccessToken = async (req, res, next) => {
     try {
         const refreshToken = req.cookies.refreshToken;
 
@@ -253,7 +248,24 @@ export const refreshAccessToken = async (req, res) => {
             });
         }
 
-        const decoded = verifyRefreshToken(refreshToken);
+        let decoded;
+
+        try {
+            decoded = verifyRefreshToken(refreshToken);
+        } catch (error) {
+            if (
+                error.name === "JsonWebTokenError" ||
+                error.name === "TokenExpiredError" ||
+                error.name === "NotBeforeError"
+            ) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Invalid or expired refresh token",
+                });
+            }
+
+            throw error;
+        }
 
         const { userId, sessionId } = decoded;
 
@@ -328,16 +340,11 @@ export const refreshAccessToken = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error refreshing access token:', error);
-
-        return res.status(401).json({
-            success: false,
-            message: 'Invalid or expired refresh token',
-        });
+        next(error);
     }
 }
 
-export const logout = async (req, res) => {
+export const logout = async (req, res, next) => {
     try {
         const refreshToken = req.cookies.refreshToken;
 
@@ -373,15 +380,12 @@ export const logout = async (req, res) => {
         });
 
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Internal Server Error",
-        });
+        next(error);
     }
     
 }
 
-export const logoutAllDevices = async (req, res) => {
+export const logoutAllDevices = async (req, res, next) => {
     try {
         await Session.updateMany(
             {
@@ -408,16 +412,11 @@ export const logoutAllDevices = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error logging out from all devices:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal Server Error",
-        });
+        next(error);
     }
 };
 
-export const getMe = async (req, res) => {
+export const getMe = async (req, res, next) => {
     try {
         const user = await User.findById(req.user.userId);
 
@@ -438,11 +437,6 @@ export const getMe = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error fetching user data:', error);
-
-        return res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-        });
+        next(error);
     }
 }
